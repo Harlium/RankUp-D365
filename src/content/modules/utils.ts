@@ -5,6 +5,7 @@
 import { TableDialog } from './table-dialog';
 import { EntityMetadata, EntityMetadataCache } from '#types/global';
 import { WebApiClient } from './webapi-client';
+import { findFieldLabelElement } from './field-label';
 import {
   cachedEntitySetName,
   entitySetNameCacheKey,
@@ -534,8 +535,7 @@ export class DynamicsUtils {
       const CLASSIC_INLINE_LABEL = '.ms-crm-InlineEditLabelText';
 
       if (type === 'field') {
-        // prettier-ignore
-        labelElement = document.querySelector(`label[id$="${logicalName}-field-label"]`) as HTMLElement;
+        labelElement = findFieldLabelElement(document, logicalName);
       } else if (type === 'tab') {
         // For tabs, find by tab name
         // prettier-ignore
