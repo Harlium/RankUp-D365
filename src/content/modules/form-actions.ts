@@ -343,13 +343,25 @@ export class FormActions {
   /**
    * Open current record in Web API
    */
-  openWebApiRecord(): string {
+  async openWebApiRecord(): Promise<string> {
     const xrm = this.getXrm();
     const entityName = xrm.Page.data.entity.getEntityName();
     const recordId = xrm.Page.data.entity.getId().replace(/[{}]/g, '');
     const orgUrl = DynamicsUtils.getOrganizationUrl();
 
-    const webApiUrl = `${orgUrl}/api/data/v9.0/${DynamicsUtils.getEntityCollectionName(entityName)}(${recordId})`;
+    let collection: string;
+    try {
+      collection = await DynamicsUtils.getEntityCollectionName(entityName);
+    } catch (error) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : `Could not resolve the Web API name for ${entityName}`;
+      DynamicsUtils.showToast(message, 'error');
+      return message;
+    }
+
+    const webApiUrl = `${orgUrl}/api/data/v9.0/${collection}(${recordId})`;
     Xrm.Navigation.openUrl(webApiUrl);
 
     return 'Web API record opened in new tab';
@@ -500,7 +512,7 @@ export class FormActions {
     try {
       const entityLogicalName = xrm.Page.data.entity.getEntityName();
       const recordId = xrm.Page.data.entity.getId().replace(/[{}]/g, '');
-      const collection = DynamicsUtils.getEntityCollectionName(entityLogicalName);
+      const collection = await DynamicsUtils.getEntityCollectionName(entityLogicalName);
       const webApiClient = WebApiClient.getInstance();
 
       // Retrieve full record with annotations to get formatted values

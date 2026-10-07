@@ -316,6 +316,7 @@ export class LevelUpExtension {
         select: [
           'LogicalName',
           'DisplayName',
+          'EntitySetName',
           'LogicalCollectionName',
           'IconSmallName',
           'IconMediumName',

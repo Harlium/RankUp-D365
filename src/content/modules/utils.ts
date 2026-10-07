@@ -3,7 +3,17 @@
 /// <reference types="xrm" />
 
 import { TableDialog } from './table-dialog';
-import { EntityMetadataCache } from '#types/global';
+import { EntityMetadata, EntityMetadataCache } from '#types/global';
+import { WebApiClient } from './webapi-client';
+import {
+  cachedEntitySetName,
+  entitySetNameCacheKey,
+  entitySetNameFromRecord,
+  findEntitySetName,
+  isSafeLogicalName,
+  parseEntitySetNameCache,
+  rememberEntitySetName,
+} from './entity-set-name';
 
 export interface NavigationConfig {
   url?: string;
@@ -66,21 +76,48 @@ export class DynamicsUtils {
   }
 
   /**
-   * Convert logical entity name to Web API entity set name
+   * Web API entity set name for a table logical name.
+   * Uses cached EntitySetName metadata, then EntityDefinitions. Never appends "s".
    */
-  static getEntityCollectionName(entityName: string): string {
-    // First try to get from cached metadata
-    const entityCollectionName =
-      DynamicsUtils.getEntityCollectionNameFromCache(entityName) ?? `${entityName}s`;
-    return entityCollectionName;
+  static async getEntityCollectionName(entityName: string): Promise<string> {
+    if (!isSafeLogicalName(entityName)) {
+      throw new Error(`Cannot resolve a Web API name for '${entityName}'.`);
+    }
+
+    const remembered = DynamicsUtils.readRememberedEntitySetName(entityName);
+    if (remembered) {
+      return remembered;
+    }
+
+    const fromMetadataCache = DynamicsUtils.getEntityCollectionNameFromCache(entityName);
+    if (fromMetadataCache) {
+      DynamicsUtils.storeEntitySetName(entityName, fromMetadataCache);
+      return fromMetadataCache;
+    }
+
+    const fetched = await DynamicsUtils.fetchEntitySetName(entityName);
+    DynamicsUtils.storeEntitySetName(entityName, fetched);
+    return fetched;
   }
 
   /**
-   * Get entity set name from cached metadata
+   * Entity set name previously resolved for this environment.
+   */
+  private static readRememberedEntitySetName(entityName: string): string | null {
+    try {
+      const raw = localStorage.getItem(entitySetNameCacheKey(window.location.hostname));
+      return cachedEntitySetName(parseEntitySetNameCache(raw), entityName);
+    } catch (error) {
+      DynamicsUtils._log(`Failed to read entity set name cache: ${String(error)}`, 'error');
+      return null;
+    }
+  }
+
+  /**
+   * EntitySetName from the bulk EntityDefinitions cache, when that cache has it.
    */
   private static getEntityCollectionNameFromCache(entityName: string): string | null {
     try {
-      // Try to get from different possible cache keys (environment-specific)
       const cacheKeys = [
         `levelup_entity_metadata_${window.location.hostname.toLowerCase()}`,
         'levelup_entity_metadata_cache',
@@ -88,22 +125,49 @@ export class DynamicsUtils {
 
       for (const cacheKey of cacheKeys) {
         const cached = localStorage.getItem(cacheKey);
-        if (cached) {
-          const parsed = JSON.parse(cached) as EntityMetadataCache;
-          if (parsed?.entities) {
-            const entity = parsed.entities.find(
-              e => e.LogicalName?.toLowerCase() === entityName.toLowerCase()
-            );
-            if (entity?.LogicalCollectionName) {
-              return entity.LogicalCollectionName;
-            }
-          }
+        if (!cached) {
+          continue;
+        }
+        const parsed = JSON.parse(cached) as EntityMetadataCache;
+        const entitySetName = findEntitySetName(parsed?.entities, entityName);
+        if (entitySetName) {
+          return entitySetName;
         }
       }
     } catch (error) {
       DynamicsUtils._log(`Failed to get entity set name from cache: ${String(error)}`, 'error');
     }
     return null;
+  }
+
+  private static async fetchEntitySetName(entityName: string): Promise<string> {
+    const webApiClient = WebApiClient.getInstance();
+    const response = (await webApiClient.retrieveMultiple('EntityDefinitions', {
+      select: ['LogicalName', 'EntitySetName', 'LogicalCollectionName'],
+      filter: `LogicalName eq '${entityName}'`,
+      top: 1,
+    })) as { value?: EntityMetadata[] };
+
+    const entitySetName = entitySetNameFromRecord(response.value?.[0]);
+    if (!entitySetName) {
+      throw new Error(
+        `Could not resolve the Web API entity set name for '${entityName}'. The table metadata did not include EntitySetName.`
+      );
+    }
+    return entitySetName;
+  }
+
+  private static storeEntitySetName(entityName: string, entitySetName: string): void {
+    try {
+      const key = entitySetNameCacheKey(window.location.hostname);
+      const current = parseEntitySetNameCache(localStorage.getItem(key));
+      localStorage.setItem(
+        key,
+        JSON.stringify(rememberEntitySetName(current, entityName, entitySetName))
+      );
+    } catch (error) {
+      DynamicsUtils._log(`Failed to cache entity set name: ${String(error)}`, 'error');
+    }
   }
 
   /**
