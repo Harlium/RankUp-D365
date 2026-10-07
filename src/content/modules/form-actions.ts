@@ -5,7 +5,8 @@
 import { DynamicsUtils } from './utils';
 import { WebApiClient } from './webapi-client';
 import { ConfettiEffects } from './confetti-effects';
-import { OptionSetData, OptionSetControl, OptionSetOption } from '#types/global';
+import { OptionSetData, OptionSetOption } from '#types/global';
+import { isChoiceControlType, readChoiceOptions } from './choice-controls';
 
 interface Solution {
   uniquename: string;
@@ -391,14 +392,13 @@ export class FormActions {
    */
   showOptionSetValues(): string {
     const xrm = this.getXrm();
-    // Get all optionset controls and their options
+    // Option sets, multi-select choices, and Two Options (boolean) controls.
     const optionsetData: OptionSetData[] = xrm.Page.getControl()
-      .filter((x: Xrm.Controls.Control) => x.getControlType() === 'optionset')
-      .map((x: Xrm.Controls.Control) => {
-        const optionsetControl = x as OptionSetControl;
+      .filter((control: Xrm.Controls.Control) => isChoiceControlType(control.getControlType?.()))
+      .map((control: Xrm.Controls.Control) => {
         return {
-          name: optionsetControl.getName(),
-          options: optionsetControl.getOptions(),
+          name: control.getName(),
+          options: readChoiceOptions(control),
         };
       });
 
