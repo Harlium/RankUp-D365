@@ -174,6 +174,8 @@ export interface EntityMetadata {
         };
     };
     LogicalCollectionName?: string;
+    /** Web API collection name. Prefer this over LogicalCollectionName. */
+    EntitySetName?: string;
     ObjectTypeCode?: number;
     IconSmallName?: string | null;
     IconMediumName?: string | null;

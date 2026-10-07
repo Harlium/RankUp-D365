@@ -5,7 +5,9 @@
 import { DynamicsUtils } from './utils';
 import { WebApiClient } from './webapi-client';
 import { ConfettiEffects } from './confetti-effects';
-import { OptionSetData, OptionSetControl, OptionSetOption } from '#types/global';
+import { OptionSetData, OptionSetOption } from '#types/global';
+import { isChoiceControlType, readChoiceOptions } from './choice-controls';
+import { buildCloneParameters, CloneAttributeInput } from './clone-parameters';
 
 interface Solution {
   uniquename: string;
@@ -50,6 +52,25 @@ interface CustomApiProcess {
   modifiedon?: string;
   _ownerid_value?: string;
   _ownerid_value_Formatted?: string;
+}
+
+function toCloneAttribute(attribute: Xrm.Attributes.Attribute): CloneAttributeInput {
+  let canCreate: boolean | undefined;
+  try {
+    const privilege = attribute.getUserPrivilege();
+    if (typeof privilege?.canCreate === 'boolean') {
+      canCreate = privilege.canCreate;
+    }
+  } catch {
+    canCreate = undefined;
+  }
+
+  return {
+    name: attribute.getName(),
+    type: attribute.getAttributeType(),
+    value: attribute.getValue(),
+    canCreate,
+  };
 }
 
 export class FormActions {
@@ -343,13 +364,25 @@ export class FormActions {
   /**
    * Open current record in Web API
    */
-  openWebApiRecord(): string {
+  async openWebApiRecord(): Promise<string> {
     const xrm = this.getXrm();
     const entityName = xrm.Page.data.entity.getEntityName();
     const recordId = xrm.Page.data.entity.getId().replace(/[{}]/g, '');
     const orgUrl = DynamicsUtils.getOrganizationUrl();
 
-    const webApiUrl = `${orgUrl}/api/data/v9.0/${DynamicsUtils.getEntityCollectionName(entityName)}(${recordId})`;
+    let collection: string;
+    try {
+      collection = await DynamicsUtils.getEntityCollectionName(entityName);
+    } catch (error) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : `Could not resolve the Web API name for ${entityName}`;
+      DynamicsUtils.showToast(message, 'error');
+      return message;
+    }
+
+    const webApiUrl = `${orgUrl}/api/data/v9.0/${collection}(${recordId})`;
     Xrm.Navigation.openUrl(webApiUrl);
 
     return 'Web API record opened in new tab';
@@ -379,14 +412,13 @@ export class FormActions {
    */
   showOptionSetValues(): string {
     const xrm = this.getXrm();
-    // Get all optionset controls and their options
+    // Option sets, multi-select choices, and Two Options (boolean) controls.
     const optionsetData: OptionSetData[] = xrm.Page.getControl()
-      .filter((x: Xrm.Controls.Control) => x.getControlType() === 'optionset')
-      .map((x: Xrm.Controls.Control) => {
-        const optionsetControl = x as OptionSetControl;
+      .filter((control: Xrm.Controls.Control) => isChoiceControlType(control.getControlType?.()))
+      .map((control: Xrm.Controls.Control) => {
         return {
-          name: optionsetControl.getName(),
-          options: optionsetControl.getOptions(),
+          name: control.getName(),
+          options: readChoiceOptions(control),
         };
       });
 
@@ -438,33 +470,9 @@ export class FormActions {
     const xrm = this.getXrm();
     const entityName = xrm.Page.data.entity.getEntityName();
 
-    // Get all field values to pass as parameters
-    const parameters: Record<string, string> = {};
-    const attributes = xrm.Page.data.entity.attributes
-      .get()
-      .filter(
-        a =>
-          a.getName() !== 'createdon' &&
-          a.getName() !== 'modifiedon' &&
-          a.getName() !== 'createdby' &&
-          a.getName() !== 'modifiedby' &&
-          a.getName() !== 'ownerid'
-      );
-
-    attributes.forEach((attr: Xrm.Attributes.Attribute) => {
-      const value = attr.getValue();
-      if (value) {
-        const attributeName = attr.getName();
-        if (attr.getAttributeType() === 'lookup' && Array.isArray(value) && value.length > 0) {
-          const lookupValue = value as Xrm.LookupValue[];
-          parameters[attributeName] = lookupValue[0].id;
-          parameters[`${attributeName}name`] = lookupValue[0].name ?? '';
-          parameters[`${attributeName}type`] = lookupValue[0].entityType;
-        } else {
-          parameters[attributeName] = String(value);
-        }
-      }
-    });
+    const parameters = buildCloneParameters(
+      xrm.Page.data.entity.attributes.get().map(attr => toCloneAttribute(attr))
+    );
     await Xrm.Navigation.openForm({ entityName: entityName, openInNewWindow: true }, parameters);
 
     return 'Record cloned in new window';
@@ -500,7 +508,7 @@ export class FormActions {
     try {
       const entityLogicalName = xrm.Page.data.entity.getEntityName();
       const recordId = xrm.Page.data.entity.getId().replace(/[{}]/g, '');
-      const collection = DynamicsUtils.getEntityCollectionName(entityLogicalName);
+      const collection = await DynamicsUtils.getEntityCollectionName(entityLogicalName);
       const webApiClient = WebApiClient.getInstance();
 
       // Retrieve full record with annotations to get formatted values

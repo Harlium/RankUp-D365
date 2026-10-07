@@ -11,7 +11,6 @@ module.exports = {
       },
     ],
   },
-  setupFilesAfterEnv: ['<rootDir>/tests/setup.ts'],
   collectCoverageFrom: ['src/**/*.ts', '!src/**/*.d.ts'],
   testTimeout: 30000, // Increased timeout for Chrome extension tests
   verbose: true,
@@ -32,7 +31,4 @@ module.exports = {
     '^#background/(.*)$': '<rootDir>/src/background/$1',
     '^#data/(.*)$': '<rootDir>/src/data/$1',
   },
-  // Global setup for Chrome extension testing
-  globalSetup: '<rootDir>/tests/global-setup.ts',
-  globalTeardown: '<rootDir>/tests/global-teardown.ts',
 };
