@@ -7,6 +7,7 @@ import { WebApiClient } from './webapi-client';
 import { ConfettiEffects } from './confetti-effects';
 import { OptionSetData, OptionSetOption } from '#types/global';
 import { isChoiceControlType, readChoiceOptions } from './choice-controls';
+import { buildCloneParameters, CloneAttributeInput } from './clone-parameters';
 
 interface Solution {
   uniquename: string;
@@ -51,6 +52,25 @@ interface CustomApiProcess {
   modifiedon?: string;
   _ownerid_value?: string;
   _ownerid_value_Formatted?: string;
+}
+
+function toCloneAttribute(attribute: Xrm.Attributes.Attribute): CloneAttributeInput {
+  let canCreate: boolean | undefined;
+  try {
+    const privilege = attribute.getUserPrivilege();
+    if (typeof privilege?.canCreate === 'boolean') {
+      canCreate = privilege.canCreate;
+    }
+  } catch {
+    canCreate = undefined;
+  }
+
+  return {
+    name: attribute.getName(),
+    type: attribute.getAttributeType(),
+    value: attribute.getValue(),
+    canCreate,
+  };
 }
 
 export class FormActions {
@@ -450,33 +470,9 @@ export class FormActions {
     const xrm = this.getXrm();
     const entityName = xrm.Page.data.entity.getEntityName();
 
-    // Get all field values to pass as parameters
-    const parameters: Record<string, string> = {};
-    const attributes = xrm.Page.data.entity.attributes
-      .get()
-      .filter(
-        a =>
-          a.getName() !== 'createdon' &&
-          a.getName() !== 'modifiedon' &&
-          a.getName() !== 'createdby' &&
-          a.getName() !== 'modifiedby' &&
-          a.getName() !== 'ownerid'
-      );
-
-    attributes.forEach((attr: Xrm.Attributes.Attribute) => {
-      const value = attr.getValue();
-      if (value) {
-        const attributeName = attr.getName();
-        if (attr.getAttributeType() === 'lookup' && Array.isArray(value) && value.length > 0) {
-          const lookupValue = value as Xrm.LookupValue[];
-          parameters[attributeName] = lookupValue[0].id;
-          parameters[`${attributeName}name`] = lookupValue[0].name ?? '';
-          parameters[`${attributeName}type`] = lookupValue[0].entityType;
-        } else {
-          parameters[attributeName] = String(value);
-        }
-      }
-    });
+    const parameters = buildCloneParameters(
+      xrm.Page.data.entity.attributes.get().map(attr => toCloneAttribute(attr))
+    );
     await Xrm.Navigation.openForm({ entityName: entityName, openInNewWindow: true }, parameters);
 
     return 'Record cloned in new window';
